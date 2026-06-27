@@ -14,31 +14,20 @@ MEMBRANA: ninguna funcion lee snapshots (nivel 1). Se devuelve content_hash,
 nunca bytes. Aqui NO se importa nada que toque AEC/snapshots.
 """
 import logging
-import os
 from typing import Optional
 
 from sqlalchemy import text
 
 from db import get_readonly_session
 from normaliza_url import canonical
+from embeddings import embed, TASK_QUERY
 
 logger = logging.getLogger(__name__)
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
-
 
 def _generate_query_embedding(query_text: str) -> list | None:
-    if not OPENAI_API_KEY:
-        return None
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        resp = client.embeddings.create(model=EMBEDDING_MODEL, input=query_text.strip())
-        return resp.data[0].embedding
-    except Exception as e:
-        logger.warning("Embedding generation failed: %s", e)
-        return None
+    """Embedding del query con task type RETRIEVAL_QUERY (asimetria de retrieval)."""
+    return embed(query_text, TASK_QUERY)
 
 
 # ════════════════════════════════════════════════════════════════

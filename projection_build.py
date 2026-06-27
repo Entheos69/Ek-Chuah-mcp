@@ -36,11 +36,10 @@ import sys
 from sqlalchemy import text
 
 from db import get_engine
+import embeddings
+from embeddings import TASK_DOCUMENT
 
 logger = logging.getLogger(__name__)
-
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 
 _TABLAS_PROYECCION = ["inscripcion", "necesidad", "consulta", "referente",
                       "version", "afirmacion", "referente_assert"]
@@ -183,15 +182,12 @@ def rebuild_projection(engine, with_embeddings: bool = True) -> dict:
 
 
 def _build_embeddings(engine) -> int:
-    """Computa embedding de cada afirmacion.txt para aec_search. Regenerable."""
-    if not OPENAI_API_KEY:
-        logger.warning("OPENAI_API_KEY ausente: aec_search caera a ILIKE (sin embeddings)")
-        return 0
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
-    except Exception as e:
-        logger.warning("OpenAI no disponible: %s", e)
+    """Computa embedding de cada afirmacion.txt para aec_search (Gemini, RETRIEVAL_DOCUMENT).
+
+    Regenerable (indice, no verdad): re-correr el rebuild lo recomputa.
+    """
+    if not embeddings.available():
+        logger.warning("GEMINI_API_KEY ausente: aec_search caera a ILIKE (sin embeddings)")
         return 0
 
     with engine.connect() as cx:
@@ -200,13 +196,8 @@ def _build_embeddings(engine) -> int:
     n = 0
     with engine.begin() as cx:
         for r in rows:
-            txt = (r[1] or "").strip()
-            if not txt:
-                continue
-            try:
-                emb = client.embeddings.create(model=EMBEDDING_MODEL, input=txt).data[0].embedding
-            except Exception as e:
-                logger.warning("embedding fallo para %s: %s", r[0], e)
+            emb = embeddings.embed(r[1], TASK_DOCUMENT)
+            if not emb:
                 continue
             vec = "[" + ",".join(str(f) for f in emb) + "]"
             cx.execute(text("UPDATE afirmacion SET embedding = CAST(:v AS vector) WHERE id=:id"),

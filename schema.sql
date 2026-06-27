@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS version (
 CREATE TABLE IF NOT EXISTS afirmacion (
     id TEXT PRIMARY KEY, txt TEXT, insc_id TEXT, ref_id TEXT,
     tipo TEXT, estatus TEXT, ts TEXT,
-    embedding vector(1536)   -- indice aec_search; regenerable, fuera del falsador I1
+    embedding vector(1536)   -- indice aec_search (Gemini Embedding 001 @1536 via MRL);
+                             -- regenerable, fuera del falsador I1
 );
 CREATE TABLE IF NOT EXISTS referente_assert (
     id TEXT, referente_a TEXT, referente_b TEXT, relacion TEXT, gatillo TEXT, ts TEXT

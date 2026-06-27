@@ -61,7 +61,7 @@ normaliza_url.py     espejo vendorizado de D-ver-1 (canonical URL)
 ## Local
 
 ```bash
-cp .env.example .env          # DATABASE_URL (Postgres+pgvector) + OPENAI_API_KEY
+cp .env.example .env          # DATABASE_URL (Postgres+pgvector) + GEMINI_API_KEY
 python projection_build.py --replicate ../AEC/log/inscripciones.jsonl  # carga aec_log
 python projection_build.py --rebuild                                   # reconstruye + embeddings
 python server.py                                                       # lector en :8000
