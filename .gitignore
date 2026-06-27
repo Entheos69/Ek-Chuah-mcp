@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+*.db
+.venv/
+venv/
+
+# test artifacts
+_ref_dump_*.json
