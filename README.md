@@ -16,7 +16,7 @@ La nube **no** recibe la proyeccion ya construida; recibe el **log** (forma Q) y
 one-way, y reusa el stack `concept-sediment-mcp`.
 
 ```
-  Scripts/AEC/log/inscripciones.jsonl   (durable local, la VERDAD -- CodeCS)
+  ../AEC/log/inscripciones.jsonl        (durable local, la VERDAD -- CodeCS)
         |  exportador del log  (SOL JOINT a CodeCS; bytes nivel-1 NO cruzan)
         v
   aec_log (JSONB append-only)           copia replicada del log en la nube
