@@ -66,12 +66,18 @@ def _hit_from_row(row, with_sim: bool) -> dict:
     return hit
 
 
-def aec_search(query: str, limit: int = 10) -> dict:
+def aec_search(query: str, limit: int = 10, include_superadas: bool = False) -> dict:
     """Indice anti-re-investigacion. Embedding (pgvector) con fallback ILIKE.
 
     Cada hit trae stub de via (necesidad + pin de version) -- NUNCA un dato pelon (I3).
     La via completa se expande on-demand con aec_get_via.
+
+    G-post: por defecto excluye afirmaciones superadas/retractadas (solo estatus='afirmado')
+    -- una reconsideracion no debe re-aparecer como saber vigente. include_superadas=True
+    las trae (historia; Forma-vs-Valor: se conservan, no se borran).
     """
+    # el estatus efectivo ya lo dejo aplicado el rebuild (la revision volteo afirmacion.estatus)
+    est = "" if include_superadas else " AND a.estatus = 'afirmado'"
     embedding = _generate_query_embedding(query)
     session = get_readonly_session()
     try:
@@ -79,7 +85,7 @@ def aec_search(query: str, limit: int = 10) -> dict:
             vec = "[" + ",".join(str(f) for f in embedding) + "]"
             sql = _SEARCH_SELECT.format(
                 sim=", 1 - (a.embedding <=> CAST(:vec AS vector)) AS similarity")
-            sql += (" WHERE a.embedding IS NOT NULL"
+            sql += (" WHERE a.embedding IS NOT NULL" + est +
                     " ORDER BY a.embedding <=> CAST(:vec AS vector) ASC LIMIT :limit")
             rows = session.execute(text(sql), {"vec": vec, "limit": limit}).fetchall()
             if rows:
@@ -88,7 +94,7 @@ def aec_search(query: str, limit: int = 10) -> dict:
 
         # fallback ILIKE sobre el texto de la afirmacion
         sql = _SEARCH_SELECT.format(sim="")
-        sql += " WHERE a.txt ILIKE :pat ORDER BY a.ts DESC LIMIT :limit"
+        sql += " WHERE a.txt ILIKE :pat" + est + " ORDER BY a.ts DESC LIMIT :limit"
         rows = session.execute(text(sql), {"pat": f"%{query}%", "limit": limit}).fetchall()
         return {"count": len(rows), "mode": "ilike",
                 "hits": [_hit_from_row(r, False) for r in rows]}
@@ -112,6 +118,15 @@ def aec_get_via(af_id: str) -> dict | None:
             "afirmacion": {"af_id": a.id, "txt": a.txt, "tipo": a.tipo, "estatus": a.estatus},
             "inferencia": None, "version": None, "consulta": None, "necesidad": None,
         }
+        # G-post: si la afirmacion fue reconsiderada, trae su historial auditado (I3 extendido:
+        # leer trae tambien el porque dejo de sostenerse).
+        if a.estatus != "afirmado":
+            revs = session.execute(text(
+                "SELECT nuevo_estatus, reemplazada_por, motivo, gatillo FROM revision "
+                "WHERE target_af=:id ORDER BY ts ASC"), {"id": af_id}).fetchall()
+            out["reconsideracion"] = [
+                {"nuevo_estatus": r.nuevo_estatus, "reemplazada_por": r.reemplazada_por,
+                 "motivo": r.motivo, "gatillo": r.gatillo} for r in revs]
         if a.insc_id:
             i = session.execute(text(
                 "SELECT * FROM inscripcion WHERE id=:id"), {"id": a.insc_id}).fetchone()
@@ -128,7 +143,7 @@ def aec_get_via(af_id: str) -> dict | None:
                 out["version"] = {
                     "referente_id": v.referente_id, "content_hash": v.content_hash,
                     "url_cruda": v.url_cruda, "capture_ts": v.capture_ts,
-                    "estatus_ref": "viva",
+                    "estatus_ref": v.estatus or "viva",
                 }
                 q = session.execute(text(
                     "SELECT * FROM consulta WHERE id=:id"), {"id": v.q_id}).fetchone()
@@ -191,7 +206,7 @@ def aec_resolve(locator: str) -> dict | None:
             return None
 
         versions = session.execute(text(
-            "SELECT id, content_hash, capture_ts FROM version "
+            "SELECT id, content_hash, capture_ts, estatus FROM version "
             "WHERE referente_id=:r ORDER BY capture_ts DESC, id DESC"),
             {"r": ref_id}).fetchall()
 
@@ -202,7 +217,7 @@ def aec_resolve(locator: str) -> dict | None:
             out_versions.append({
                 "content_hash": v.content_hash,
                 "capture_ts": v.capture_ts,
-                "estatus": "viva",
+                "estatus": v.estatus or "viva",
                 "afirmaciones": [a.id for a in afs],
             })
 

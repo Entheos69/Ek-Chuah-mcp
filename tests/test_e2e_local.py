@@ -25,10 +25,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LOG = os.path.join(os.path.dirname(__file__), "..", "..", "AEC", "log", "inscripciones.jsonl")
 REF = os.path.join(os.path.dirname(__file__), "..", "_ref_dump_substrato.json")
 
-EXPECTED_COUNTS = {"inscripcion": 1, "necesidad": 1, "consulta": 2, "referente": 3,
-                   "version": 3, "afirmacion": 2, "referente_assert": 0}
-
-
 def _ok(msg): print(f"  [OK] {msg}")
 def _fail(msg): print(f"  [FAIL] {msg}"); sys.exit(1)
 
@@ -52,17 +48,21 @@ def main():
     if n2 != 0: _fail(f"replicacion no idempotente: segundo run trajo {n2}")
     _ok("replicacion idempotente (2o run = 0)")
 
+    # Verdad esperada = el dump del substrato (self-updating: se regenera cuando el log
+    # crece o cambia el schema). Evita re-hardcodear counts que driftean con cada grano.
+    ref = open(REF, encoding="utf-8").read() if os.path.exists(REF) else None
+    expected_counts = ({t: len(rows) for t, rows in json.loads(ref)} if ref else None)
+
     print("== rebuild (sin embeddings) ==")
     res = pb.rebuild_projection(engine, with_embeddings=False)
-    if res["counts"] != EXPECTED_COUNTS:
-        _fail(f"counts {res['counts']} != esperado {EXPECTED_COUNTS}")
+    if expected_counts is not None and res["counts"] != expected_counts:
+        _fail(f"counts {res['counts']} != esperado (substrato) {expected_counts}")
     _ok(f"counts correctos: {res['counts']}")
 
     print("== falsador I1: parity vs substrato SQLite ==")
     dump = pb.dump_logico(engine)
     blob = json.dumps(dump, ensure_ascii=False, sort_keys=True, default=str)
-    if os.path.exists(REF):
-        ref = open(REF, encoding="utf-8").read()
+    if ref is not None:
         if blob == ref:
             _ok("dump Postgres == dump substrato SQLite (I1 cross-store)")
         else:
@@ -118,6 +118,31 @@ def main():
     if h.get("necesidad_stub") is None or h.get("version_pin") is None:
         _fail(f"hit pelon (sin stub de via): {h}")
     _ok(f"search modo={sr['mode']} count={sr['count']}; hit trae stub de via (no pelon, I3)")
+
+    print("== G-post: reconsideracion (revision) sobre Postgres ==")
+    target = af_ids[0]
+    rev_ev = {"ev": "revision", "id": "e2e-rev-1", "target_af": target,
+              "nuevo_estatus": "superada", "reemplazada_por": None,
+              "motivo": "e2e", "gatillo": "explicito:'e2e'", "ts": "2026-07-02T00:00:00"}
+    with engine.begin() as cx:
+        cx.execute(text("INSERT INTO aec_log (line_sha, event) VALUES (:s, CAST(:e AS jsonb)) "
+                        "ON CONFLICT (line_sha) DO NOTHING"),
+                   {"s": pb._line_sha(rev_ev), "e": pb._canon_line(rev_ev)})
+    pb.rebuild_projection(engine, with_embeddings=False)
+    session = get_readonly_session()
+    est = session.execute(text("SELECT estatus FROM afirmacion WHERE id=:i"),
+                          {"i": target}).fetchone()[0]
+    session.close()
+    if est != "superada":
+        _fail(f"revision no volteo el estatus en Postgres: {est}")
+    via2 = q.aec_get_via(target)
+    if not via2.get("reconsideracion"):
+        _fail("aec_get_via no expone el historial de reconsideracion")
+    # la superada sale de la vista por default; incluible con include_superadas
+    txt = via2["afirmacion"]["txt"]
+    if any(h["af_id"] == target for h in q.aec_search(txt, limit=20)["hits"]):
+        _fail("aec_search devolvio una afirmacion superada por default")
+    _ok("revision voltea estatus + aec_get_via trae historial + aec_search la excluye (G-post)")
 
     print("== membrana: lector es read-only ==")
     session = get_readonly_session()

@@ -83,6 +83,9 @@ class SearchInput(BaseModel):
                        min_length=1, max_length=500)
     limit: int = Field(default=10, ge=1, le=50)
     format: str = Field(default="json", description="'json' | 'markdown'")
+    include_superadas: bool = Field(
+        default=False,
+        description="incluir afirmaciones superadas/retractadas (default: solo vigentes)")
 
 
 @mcp.tool(name="aec_search", annotations=_ann("AEC Search (anti-re-investigation index)"))
@@ -93,7 +96,7 @@ def t_aec_search(params: SearchInput) -> str:
     (la necesidad de la que nacio + el pin de version al que esta anclado) --
     NUNCA un dato pelon (I3). Expande la via completa con aec_get_via(af_id).
     """
-    return json.dumps(aec_search(params.query, params.limit),
+    return json.dumps(aec_search(params.query, params.limit, params.include_superadas),
                       ensure_ascii=False, indent=2, default=str)
 
 

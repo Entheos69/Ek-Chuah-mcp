@@ -42,7 +42,7 @@ from embeddings import TASK_DOCUMENT
 logger = logging.getLogger(__name__)
 
 _TABLAS_PROYECCION = ["inscripcion", "necesidad", "consulta", "referente",
-                      "version", "afirmacion", "referente_assert"]
+                      "version", "afirmacion", "referente_assert", "revision"]
 
 
 def _canon_line(ev: dict) -> str:
@@ -150,11 +150,12 @@ def rebuild_projection(engine, with_embeddings: bool = True) -> dict:
                     "WHERE referente_id=:ref AND primera_captura > :cap"),
                     {"ref": ref, "cap": ev["capture_ts"]})
                 cx.execute(text(
-                    "INSERT INTO version VALUES (:id,:ref,:ch,:url,:cap,:ff,:q,:ts) "
+                    "INSERT INTO version VALUES (:id,:ref,:ch,:url,:cap,:ff,:q,:est,:ts) "
                     "ON CONFLICT (id) DO NOTHING"),
                     {"id": ev["id"], "ref": ref, "ch": ev["content_hash"],
                      "url": ev["url_cruda"], "cap": ev["capture_ts"],
-                     "ff": ev["fecha_fuente"], "q": ev["q_id"], "ts": ts})
+                     "ff": ev["fecha_fuente"], "q": ev["q_id"],
+                     "est": ev.get("estatus", "viva"), "ts": ts})
             elif kind == "afirmacion":
                 cx.execute(text(
                     "INSERT INTO afirmacion (id,txt,insc_id,ref_id,tipo,estatus,ts) "
@@ -167,6 +168,18 @@ def rebuild_projection(engine, with_embeddings: bool = True) -> dict:
                     "INSERT INTO referente_assert VALUES (:id,:a,:b,:rel,:gat,:ts)"),
                     {"id": ev["id"], "a": ev["referente_a"], "b": ev["referente_b"],
                      "rel": ev["relacion"], "gat": ev["gatillo"], "ts": ts})
+            elif kind == "revision":
+                # G-post: reconsideracion append-only. La afirmacion target ya se inserto
+                # (la revision llega despues en el log) -> voltear su estatus efectivo. La
+                # afirmacion NO se borra (Forma-vs-Valor). Espejo de proyeccion.py (substrato).
+                cx.execute(text(
+                    "INSERT INTO revision VALUES (:id,:t,:ne,:rp,:mot,:gat,:ts) "
+                    "ON CONFLICT (id) DO NOTHING"),
+                    {"id": ev["id"], "t": ev["target_af"], "ne": ev["nuevo_estatus"],
+                     "rp": ev.get("reemplazada_por"), "mot": ev.get("motivo"),
+                     "gat": ev.get("gatillo"), "ts": ts})
+                cx.execute(text("UPDATE afirmacion SET estatus=:ne WHERE id=:t"),
+                           {"ne": ev["nuevo_estatus"], "t": ev["target_af"]})
 
     counts = {}
     with engine.connect() as cx:
@@ -221,9 +234,10 @@ def dump_logico(engine) -> list:
         "necesidad": "id,pregunta,gatillo,origen_nodo,ts",
         "consulta": "id,nec_id,formulacion,ts",
         "referente": "referente_id,primera_captura",
-        "version": "id,referente_id,content_hash,url_cruda,capture_ts,fecha_fuente,q_id,ts",
+        "version": "id,referente_id,content_hash,url_cruda,capture_ts,fecha_fuente,q_id,estatus,ts",
         "afirmacion": "id,txt,insc_id,ref_id,tipo,estatus,ts",
         "referente_assert": "id,referente_a,referente_b,relacion,gatillo,ts",
+        "revision": "id,target_af,nuevo_estatus,reemplazada_por,motivo,gatillo,ts",
     }
     out = []
     with engine.connect() as cx:

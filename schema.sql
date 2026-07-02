@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS referente (
 );
 CREATE TABLE IF NOT EXISTS version (
     id TEXT PRIMARY KEY, referente_id TEXT, content_hash TEXT, url_cruda TEXT,
-    capture_ts TEXT, fecha_fuente TEXT, q_id TEXT, ts TEXT
+    capture_ts TEXT, fecha_fuente TEXT, q_id TEXT, estatus TEXT, ts TEXT
 );
 CREATE TABLE IF NOT EXISTS afirmacion (
     id TEXT PRIMARY KEY, txt TEXT, insc_id TEXT, ref_id TEXT,
@@ -55,9 +55,21 @@ CREATE TABLE IF NOT EXISTS afirmacion (
 CREATE TABLE IF NOT EXISTS referente_assert (
     id TEXT, referente_a TEXT, referente_b TEXT, relacion TEXT, gatillo TEXT, ts TEXT
 );
+-- G-post: reconsideracion del camino epistemico (append-only, espejo del substrato).
+-- La revision voltea afirmacion.estatus al reconstruir; la afirmacion NO se borra.
+CREATE TABLE IF NOT EXISTS revision (
+    id TEXT PRIMARY KEY, target_af TEXT, nuevo_estatus TEXT,
+    reemplazada_por TEXT, motivo TEXT, gatillo TEXT, ts TEXT
+);
+
+-- Evolucion de schema idempotente: CREATE TABLE IF NOT EXISTS no altera una tabla ya
+-- desplegada. version.estatus es columna nueva (G-post) -> agregarla si falta, para que
+-- ensure_schema sea seguro sobre la prod existente (la proyeccion se repuebla en el rebuild).
+ALTER TABLE version ADD COLUMN IF NOT EXISTS estatus TEXT;
 
 CREATE INDEX IF NOT EXISTS ix_ver_ref ON version(referente_id);
 CREATE INDEX IF NOT EXISTS ix_ins_huella ON inscripcion(huella);
 CREATE INDEX IF NOT EXISTS ix_af_ref ON afirmacion(ref_id);
 CREATE INDEX IF NOT EXISTS ix_af_insc ON afirmacion(insc_id);
 CREATE INDEX IF NOT EXISTS ix_consulta_nec ON consulta(nec_id);
+CREATE INDEX IF NOT EXISTS ix_rev_target ON revision(target_af);
