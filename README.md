@@ -22,7 +22,7 @@ one-way, y reusa el stack `concept-sediment-mcp`.
   aec_log (JSONB append-only)           copia replicada del log en la nube
         |  projection_build.rebuild_projection  (idempotente, det.)
         v
-  7 tablas graph_aec + afirmacion.embedding   proyeccion REGENERABLE
+  tablas graph_aec + afirmacion.embedding   proyeccion REGENERABLE
         |  queries.py (read-only)
         v
   4 tools MCP  ->  cualquier IA
@@ -52,8 +52,9 @@ expande la via completa. 5a tool `aec_divergencia` **diferida** (LECTOR_C3 §8).
 ```
 server.py            FastMCP + Starlette + 4 tools aec_*
 queries.py           lectura read-only (ports de proyeccion.py)
-projection_build.py  rebuild de aec_log -> 7 tablas + embeddings (camino B)
-schema.sql           DDL: aec_log + 7 tablas proyeccion + pgvector
+projection_build.py  rebuild de aec_log -> proyeccion + embeddings (camino B)
+                     _TABLAS_PROYECCION es la lista canonica de tablas
+schema.sql           DDL: aec_log + tablas de proyeccion + pgvector
 db.py                engine; get_readonly_session (defensa membrana)
 normaliza_url.py     espejo vendorizado de D-ver-1 (canonical URL)
 ```

@@ -7,7 +7,7 @@
 --                     Es la VERDAD en la nube. Append-only. La llena el exportador
 --                     de CodeCS (SOL del borde). Lleva content_hash, NUNCA bytes.
 --
---   7 tablas        = la proyeccion REGENERABLE. Se truncan y reconstruyen de
+--   proyeccion      = las tablas REGENERABLES. Se truncan y reconstruyen de
 --                     aec_log (projection_build.rebuild_projection). Falsador I1:
 --                     borrar y rehacer del log = identico.
 --
@@ -15,7 +15,7 @@
 --                     no es parte de la verdad del log; el falsador logico I1 lo
 --                     excluye (compara solo las columnas que vienen del log).
 --
--- Nombres de las 7 tablas IDENTICOS a Ek-Chuah/proyeccion.py (paridad de rebuild
+-- Nombres de las tablas IDENTICOS a Ek-Chuah/proyeccion.py (paridad de rebuild
 -- SQLite<->Postgres). Esta BD es store nuevo dedicado al dominio AEC -- sin colision.
 
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS aec_log (
     ingested_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---- capa 2: la proyeccion regenerable (las 7 tablas, espejo de proyeccion.py) ----
+-- ---- capa 2: la proyeccion regenerable (espejo de proyeccion.py) ----
 CREATE TABLE IF NOT EXISTS inscripcion (
     id TEXT PRIMARY KEY, premisa TEXT, busqueda TEXT, resultados_crudos TEXT,
     conclusion TEXT, inferidor_model TEXT, inferidor_ts TEXT, huella TEXT, ts TEXT

@@ -9,7 +9,8 @@ Postgres coincide con el de la proyeccion SQLite del substrato sobre el mismo lo
 
 Dos capas (ver schema.sql):
   - aec_log    : copia replicada del log durable. La VERDAD en la nube.
-  - 7 tablas   : proyeccion regenerable. rebuild_projection las trunca y rehace.
+  - proyeccion : tablas regenerables (_TABLAS_PROYECCION, lista canonica).
+                 rebuild_projection las trunca y rehace.
 
 El embedding de afirmacion es indice (regenerable), no verdad: se computa aparte
 y dump_logico() lo excluye.
@@ -114,7 +115,7 @@ def _iter_log(cx):
 # ════════════════════════════════════════════════════════════════
 
 def rebuild_projection(engine, with_embeddings: bool = True) -> dict:
-    """Trunca las 7 tablas y las reconstruye de aec_log. Idempotente/determinista."""
+    """Trunca _TABLAS_PROYECCION y las reconstruye de aec_log. Idempotente/determinista."""
     with engine.begin() as cx:
         cx.execute(text("TRUNCATE " + ", ".join(_TABLAS_PROYECCION)))
         for ev in _iter_log(cx):
@@ -224,7 +225,7 @@ def _build_embeddings(engine) -> int:
 # ════════════════════════════════════════════════════════════════
 
 def dump_logico(engine) -> list:
-    """Volcado canonico de las 7 tablas para comparar reconstrucciones (I1).
+    """Volcado canonico de _TABLAS_PROYECCION para comparar reconstrucciones (I1).
 
     Excluye afirmacion.embedding (indice regenerable, no verdad). El resultado
     debe coincidir con Ek-Chuah/proyeccion.dump_logico sobre el mismo log.
@@ -256,7 +257,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="rebuild graph_aec en Postgres (camino B)")
     ap.add_argument("--schema", action="store_true", help="crear/asegurar schema")
     ap.add_argument("--replicate", metavar="JSONL", help="cargar log local a aec_log (prueba)")
-    ap.add_argument("--rebuild", action="store_true", help="reconstruir las 7 tablas de aec_log")
+    ap.add_argument("--rebuild", action="store_true", help="reconstruir la proyeccion de aec_log")
     ap.add_argument("--no-embeddings", action="store_true", help="rebuild sin embeddings")
     ap.add_argument("--dump", action="store_true", help="imprimir dump logico (I1)")
     args = ap.parse_args(argv)
