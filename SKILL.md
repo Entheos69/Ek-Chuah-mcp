@@ -248,6 +248,8 @@ Verificados via `cs_search_concepts` el 2026-07-08. Al sedimentar, **reutiliza e
 - `puerta unica de mutacion del catalogo, no-destructivo por construccion`
 - `La verdad es el estado observado, no los numeros heredados de procesos previos incompletos`
 
+**Trampa de fantasma verificada 2026-07-08.** `mandato de CodeCS` y `extend-vs-spawn (D3=A F45)` se citan en el DISENO como si fueran conceptos del grafo. **No lo son** — `cs_get_concept_graph` no los encuentra. Cita el DISENO en prosa si quieres, pero **nunca los uses como `related_to.target`**. Lo mismo con el dominio `infrastructure`: no existe. Verifica dominios con `cs_get_domain_summary` antes de escribirlos.
+
 **Fractura viva (MODERADA) que te toca a ti.** `Camino B ...` esta **dormant** con dependientes **activos**, uno de ellos: *"El sistema AEC calco el LECTOR de concept-sediment-mcp pero divergio en la ESCRITURA: camino B (SQLite+log+replicate) vs patron una-DB — por eso el grano local no es visible en la nube"*. Ese es exactamente el incidente que motivo el **B realineado** (§7). El concepto padre no se ha refrescado. Si tocas el cruce local->nube, reactivalo al sedimentar en vez de escribir uno nuevo.
 
 ## 13. Aterrizaje
@@ -271,14 +273,15 @@ Cuando el Guardian diga "prepara cierre" o termine un bloque:
 concept_sediment:
   session_id: "YYYY-MM-DD-NNN-CodeAEC"   # tu firma, siempre
   project: ek-chuah
-  domains_active: [infrastructure, workflow_protocols]
+  domains_active: [mcp_architecture, devops]
   concepts:
     - name: "nombre descriptivo del concepto"
       depth: usage                       # mention | usage | decision
-      domains: [infrastructure]
+      domains: [mcp_architecture]        # VERIFICA que exista (cs_get_domain_summary)
       related_to:
         - target: "concepto existente en el grafo"
-          relation: derived_from
+          relation: derived_from         # depends_on | derived_from | contradicts
+                                         # refines | resolves | instance_of
       notes: "Como se uso o descubrio en esta sesion"
   status: draft                          # SIEMPRE draft; el Guardian lo promueve
 ```
