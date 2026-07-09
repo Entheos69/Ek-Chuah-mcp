@@ -123,7 +123,9 @@ def rebuild_projection(engine, with_embeddings: bool = True) -> dict:
             ts = ev.get("ts")
             if kind == "inscripcion":
                 cx.execute(text(
-                    "INSERT INTO inscripcion VALUES "
+                    "INSERT INTO inscripcion "
+                    "(id,premisa,busqueda,resultados_crudos,conclusion,"
+                    "inferidor_model,inferidor_ts,huella,ts) VALUES "
                     "(:id,:premisa,:busqueda,:resultados,:conclusion,:im,:its,:huella,:ts) "
                     "ON CONFLICT (id) DO NOTHING"),
                     {"id": ev["id"], "premisa": ev["premisa"],
@@ -132,26 +134,34 @@ def rebuild_projection(engine, with_embeddings: bool = True) -> dict:
                      "its": ev["inferidor_ts"], "huella": ev["huella"], "ts": ts})
             elif kind == "necesidad":
                 cx.execute(text(
-                    "INSERT INTO necesidad VALUES (:id,:preg,:gat,:org,:ts) "
+                    "INSERT INTO necesidad (id,pregunta,gatillo,origen_nodo,ts) "
+                    "VALUES (:id,:preg,:gat,:org,:ts) "
                     "ON CONFLICT (id) DO NOTHING"),
                     {"id": ev["id"], "preg": ev["pregunta"], "gat": ev["gatillo"],
                      "org": ev.get("origen_nodo"), "ts": ts})
             elif kind == "consulta":
                 cx.execute(text(
-                    "INSERT INTO consulta VALUES (:id,:nec,:form,:ts) "
+                    "INSERT INTO consulta (id,nec_id,formulacion,ts) "
+                    "VALUES (:id,:nec,:form,:ts) "
                     "ON CONFLICT (id) DO NOTHING"),
                     {"id": ev["id"], "nec": ev["nec_id"], "form": ev["formulacion"], "ts": ts})
             elif kind == "referencia":
                 ref = ev["referente_id"]
                 cx.execute(text(
-                    "INSERT INTO referente VALUES (:ref,:cap) ON CONFLICT (referente_id) DO NOTHING"),
+                    "INSERT INTO referente (referente_id,primera_captura) VALUES (:ref,:cap) "
+                    "ON CONFLICT (referente_id) DO NOTHING"),
                     {"ref": ref, "cap": ev["capture_ts"]})
                 cx.execute(text(
                     "UPDATE referente SET primera_captura=:cap "
                     "WHERE referente_id=:ref AND primera_captura > :cap"),
                     {"ref": ref, "cap": ev["capture_ts"]})
+                # Columnas NOMBRADAS, no posicionales: `estatus` llego por ALTER TABLE
+                # (G-post) y en la BD ya desplegada quedo AL FINAL, no donde la pone el
+                # CREATE TABLE. Un INSERT posicional permutaba estatus<->ts en prod.
                 cx.execute(text(
-                    "INSERT INTO version VALUES (:id,:ref,:ch,:url,:cap,:ff,:q,:est,:ts) "
+                    "INSERT INTO version "
+                    "(id,referente_id,content_hash,url_cruda,capture_ts,fecha_fuente,"
+                    "q_id,estatus,ts) VALUES (:id,:ref,:ch,:url,:cap,:ff,:q,:est,:ts) "
                     "ON CONFLICT (id) DO NOTHING"),
                     {"id": ev["id"], "ref": ref, "ch": ev["content_hash"],
                      "url": ev["url_cruda"], "cap": ev["capture_ts"],
@@ -166,7 +176,9 @@ def rebuild_projection(engine, with_embeddings: bool = True) -> dict:
                      "est": ev["estatus"], "ts": ts})
             elif kind == "referente_assert":
                 cx.execute(text(
-                    "INSERT INTO referente_assert VALUES (:id,:a,:b,:rel,:gat,:ts)"),
+                    "INSERT INTO referente_assert "
+                    "(id,referente_a,referente_b,relacion,gatillo,ts) "
+                    "VALUES (:id,:a,:b,:rel,:gat,:ts)"),
                     {"id": ev["id"], "a": ev["referente_a"], "b": ev["referente_b"],
                      "rel": ev["relacion"], "gat": ev["gatillo"], "ts": ts})
             elif kind == "revision":
@@ -174,7 +186,9 @@ def rebuild_projection(engine, with_embeddings: bool = True) -> dict:
                 # (la revision llega despues en el log) -> voltear su estatus efectivo. La
                 # afirmacion NO se borra (Forma-vs-Valor). Espejo de proyeccion.py (substrato).
                 cx.execute(text(
-                    "INSERT INTO revision VALUES (:id,:t,:ne,:rp,:mot,:gat,:ts) "
+                    "INSERT INTO revision "
+                    "(id,target_af,nuevo_estatus,reemplazada_por,motivo,gatillo,ts) "
+                    "VALUES (:id,:t,:ne,:rp,:mot,:gat,:ts) "
                     "ON CONFLICT (id) DO NOTHING"),
                     {"id": ev["id"], "t": ev["target_af"], "ne": ev["nuevo_estatus"],
                      "rp": ev.get("reemplazada_por"), "mot": ev.get("motivo"),

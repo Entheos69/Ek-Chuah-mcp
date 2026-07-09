@@ -192,6 +192,7 @@ python server.py                        # lector en :8000
 - **fastmcp:** NO subir a `>=3.4.3` sin configurar `allowed_hosts` (env `MCP_ALLOWED_HOSTS`). 3.4.3 introdujo `HostOriginGuardMiddleware` -> **421 Misdirected Request** en el dominio publico. Incidente `2026-07-07-001-CodeMCP`. Pin actual: `fastmcp==3.4.2`.
 - **Dependencias pineadas:** `requirements.txt` (directas, `==`) + `constraints.txt` (arbol completo, desde `pip freeze` del contenedor sano). El Dockerfile instala con `-c constraints.txt`. `constraints.txt` **no se edita a mano**: se regenera desde un freeze del deploy sano. `tests/test_deps_pinned.py` lo guarda.
 - **Rutas:** POSIX o `../AEC`, **nunca backslashes desnudos** (los come el shell y crean carpetas fantasma; hay guard desde 2026-07-02).
+- **INSERT con columnas nombradas, nunca posicional.** `CREATE TABLE IF NOT EXISTS` no altera una tabla ya desplegada: un `ALTER TABLE ... ADD COLUMN` posterior anexa la columna **al final**, no donde la pone el DDL. Un INSERT posicional permuta entonces los valores en prod y no en local. Asi se corrompio `version.estatus` <-> `version.ts` desde `d259208` (G-post), tumbando el falsador I2. Guard: `tests/test_inserts_columnas_nombradas.py`. Corolario: **corre el falsador I1 (`--dump` contra el substrato) despues de tocar el rebuild** — es el unico que caza esta clase de drift.
 
 ## 11. El grano: ciclo de vida (contexto — la escritura vive en `../Ek-Chuah`)
 
