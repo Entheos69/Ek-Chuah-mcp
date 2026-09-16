@@ -25,6 +25,23 @@ Si una tarea te pide romper cualquiera de estos, no es tarea de este repo:
 2. **No baja URLs.** Sin web. La `url` es metadato forense que devuelve, no que fetcha.
 3. **No sirve nivel 1.** Devuelve `content_hash`, nunca los bytes del snapshot.
 
+## Encabezado de identidad (episteme-minimo, dir. 15)
+
+Todo mensaje al Guardian empieza con una linea:
+
+    Guardian > CodeAEC @<carpeta> HH:MM-06:00
+
+- `<carpeta>`: nombre base de `pwd`, medido en ese turno (aqui varia entre
+  `Ek-Chuah-mcp` y `AEC` segun donde operes).
+- Hora, medida en ese turno con la forma portable (en Git Bash de Windows
+  `TZ=America/Mexico_City` falla sin avisar y da UTC):
+  `t=$(TZ=America/Mexico_City date +%H:%M%:z); [ "${t#*-}" = "06:00" ] || t=$(date +%H:%M%:z); echo "$t"`
+  Nunca copiar la del mensaje anterior.
+- Solo en chat. Nunca en archivos, commits, PR, YAML, SOL/HANDOFF ni codigo.
+- Canon: `docs_inducop/organizacion/SKILL_minimo.md`, directiva 15.
+- Es el canario de la fractura CRITICA "la regla en prosa no dispara": su ausencia
+  tras una compactacion avisa que los gates de ESTE archivo se debilitaron.
+
 ## Reglas que muerden aqui
 
 - **Gate MTV antes, no despues** (`cs_search_concepts`, sin filtro de proyecto). Y
