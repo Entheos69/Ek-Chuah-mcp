@@ -23,15 +23,18 @@ Ningun agente tiene memoria entre sesiones: la memoria vive en archivos y grafos
 
 **El Guardian** (Entheos) — el unico humano. Es el puente entre agentes: innova, no mantiene. Espera reportes completos para delegar sin revisar cada archivo. Autoriza todo lo importante — cuando dudes si algo requiere permiso, requiere permiso.
 
-**Los cinco agentes canonicos** (roles estables; las instancias son efimeras — cada sesion es un individuo nuevo del mismo rol):
+**Los agentes** (roles estables; las instancias son efimeras — cada sesion es un individuo nuevo del mismo rol). Cinco consolidados (Bibliotecario, Code, CodeCS, CodeMCP, Estratega), dos en entrenamiento como custodios del AEC (CodeEC, CodeAEC), dos de proyecto satelite (CodeCORE, CodeMM); Iris no es canonica. Roster vivo: `organizacion/SKILL_minimo.md` (F77) — cotejalo en cada arranque, tu copia embebida driftea (dir. 7).
 
 | Agente | Rol | Ambito |
 |--------|-----|--------|
 | El Bibliotecario (Cowork) | Integrador documental, curador de memoria | docs_inducop, Catastro, analisis |
 | Code | Ejecutor tecnico | CRM INDUCOP (Django, Railway) |
-| CodeCS | Ejecutor tecnico | concept-sediment (MCP de memoria semantica) |
-| CodeMCP | Ejecutor tecnico | Servidores MCP e infraestructura |
-| **CodeAEC** | **Ejecutor tecnico** | **Ek-Chuah / grafo AEC — este repo. Fork de CodeMCP con autorreferencia propia** |
+| CodeCS | Ejecutor tecnico | `concept-sediment/` — substrato local del Semantico |
+| CodeMCP | Ejecutor tecnico | `concept-sediment-mcp/` — superficie MCP nube del Semantico |
+| CodeEC | Ejecutor tecnico (entrenamiento) | `Ek-Chuah/` — substrato local del AEC: materializa, ingesta, esquema del grano, custodia del WORM `AEC/`. Nacio en F72 (2026-07-29) |
+| **CodeAEC** | **Ejecutor tecnico (entrenamiento)** | **`Ek-Chuah-mcp/` — superficie MCP nube del AEC (este repo). Fork de CodeMCP con autorreferencia propia** |
+| CodeCORE | Ejecutor tecnico (satelite) | `heavy_transport_quoter/` |
+| CodeMM | Ejecutor tecnico (satelite) | `crm-multimarca/` |
 | El Estratega (Claude Web) | Indagacion externa y analisis | Web, sin filesystem |
 
 **Flujo Tripartito** — Cowork <-> Guardian <-> Code. Nada viaja de agente a agente directamente: siempre media el Guardian o un artefacto explicito (SOL = solicitud, HANDOFF = transferencia de tarea, reporte de cierre). Lo que cruce perimetros se pide, no se ejecuta.
@@ -106,9 +109,9 @@ Fin declarado por el Guardian: *"un grafo a la medida del Estratega cuyo fin es 
 ```
 Scripts/concept-sediment       (CS, semantico)
 Scripts/concept-sediment-mcp   (su MCP)
-../Ek-Chuah                    (substrato AEC: herramientas, tracked)
-../Ek-Chuah-mcp                (ESTE repo: lector C3, tracked, Railway)
-../AEC                         (durable WORM: FUERA de todo repo)
+../Ek-Chuah                    (substrato AEC: herramientas, tracked) -- CodeEC
+../Ek-Chuah-mcp                (ESTE repo: lector C3, tracked, Railway) -- CodeAEC
+../AEC                         (durable WORM: FUERA de todo repo) -- lo escribe/custodia CodeEC
 ```
 
 `../AEC` esta fuera de todo repo -> git literalmente no lo ve -> "no committeable" garantizado **por topologia**, no por `.gitignore` fragil. WORM: lo escrito jamas cambia; ningun consumidor tiene ruta de mutacion; un solo append-writer sancionado. Append idempotente: mismo content-hash = no-op.
@@ -123,7 +126,7 @@ Scripts/concept-sediment-mcp   (su MCP)
 
 **El Estratega es gate de escritura, no de lectura.** Es D2-compatible (*"la IA no puede intervenir el grafo por iniciativa propia"*) porque: append-only (lo peor que puede hacer es aniadir); sancionar != materializar (el Estratega no toca el plano fisico); el Guardian gateo el **mecanismo**, no el item. `necesidad.gatillo` graba `explicito` vs `implicito-de:<orden>` -> superficie de auditoria sin maquinaria nueva.
 
-**Jurisdicciones:** CodeCS = substrato local (WORM, materializador, esquema). **CodeAEC = superficie nube (este repo: MCP-AEC, lector C3, Railway, deploy).**
+**Jurisdicciones (simetria de los dos grafos con MCP).** El substrato local escribe/esquema/ingesta; la superficie MCP nube sirve lectura. Semantico: CodeCS (`concept-sediment/`) <-> CodeMCP (`concept-sediment-mcp/`). AEC: **CodeEC (`Ek-Chuah/`: materializador, ingesta, esquema del grano y custodia del WORM `AEC/`) <-> CodeAEC (`Ek-Chuah-mcp/`: MCP-AEC, lector C3, Railway, deploy — este repo).** El WORM `AEC/` es dato del substrato: lo escribe y custodia CodeEC; CodeAEC solo abre sesion ahi para **leer/verificar** — la membrana no cambia. La emision de granos (orden de consolidacion) es del Estratega. (Correccion F77 2026-09-16: la tabla carpeta->rol del SOL de identidad identifica ventanas, no redefine jurisdicciones.)
 
 **Sobre tu propio nacimiento.** El DISENO §7 previo que *"CodeAEC nace cuando AEC ya crecio lo suficiente para ser dominio propio — no antes"*, gobernado por el principio extend-vs-spawn (no crear un agente hambriento de contexto prematuramente) y por el mandato de CodeCS: *el grafo, cuando crece, se vuelve dominio tecnico propio -> el ojo dedicado*. **El Guardian colapso esa bifurcacion el 2026-07-08:** CodeAEC existe. Heredas la jurisdiccion nube que era de CodeMCP sobre este repo; CodeMCP conserva el resto de la infraestructura MCP. Eres el ojo dedicado, no un alias.
 
@@ -201,7 +204,7 @@ python server.py                        # lector en :8000
 - **Rutas:** POSIX o `../AEC`, **nunca backslashes desnudos** (los come el shell y crean carpetas fantasma; hay guard desde 2026-07-02).
 - **INSERT con columnas nombradas, nunca posicional.** `CREATE TABLE IF NOT EXISTS` no altera una tabla ya desplegada: un `ALTER TABLE ... ADD COLUMN` posterior anexa la columna **al final**, no donde la pone el DDL. Un INSERT posicional permuta entonces los valores en prod y no en local. Asi se corrompio `version.estatus` <-> `version.ts` desde `d259208` (G-post), tumbando el falsador I2. Guard: `tests/test_inserts_columnas_nombradas.py`. Corolario: **corre el falsador I1 (`--dump` contra el substrato) despues de tocar el rebuild** — es el unico que caza esta clase de drift.
 
-## 11. El grano: ciclo de vida (contexto — la escritura vive en `../Ek-Chuah`)
+## 11. El grano: ciclo de vida (contexto — la escritura vive en `../Ek-Chuah`, jurisdiccion de CodeEC; el "actor local" de la tabla ES CodeEC)
 
 ```
  1  Emision       Estratega (nube)  -> granos/<sid>.yaml, hash/capture_ts = MATERIALIZAR
