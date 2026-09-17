@@ -68,6 +68,15 @@ Todo mensaje al Guardian empieza con una linea:
 - Python real en Windows: `C:/Python314/python`. `python3` es el alias de la Microsoft Store: no usarlo.
 - Si tras activar, `which python` no apunta a mi entorno: parar y avisar al Guardian.
 
+## Entorno Python
+- Intérprete del proyecto: `$CLAUDE_PROJECT_PY` (exportado por el launcher de Git Bash).
+  Si la variable está vacía, usar la ruta literal: `venv/Scripts/python.exe`.
+- Nunca `python` ni `pip` a secas: el shell de la herramienta resuelve al Python global.
+- Instalar: `"$CLAUDE_PROJECT_PY" -m pip install <paquete>`.
+  Con uv: `uv pip install --python "$CLAUDE_PROJECT_PY" <paquete>`.
+- Primera acción de cada sesión: `echo "$CLAUDE_PROJECT_PY"` y `command -v python`;
+  si difieren, usar siempre la primera.
+
 ## Comandos
 
 ```bash
