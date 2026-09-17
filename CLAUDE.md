@@ -59,6 +59,15 @@ Todo mensaje al Guardian empieza con una linea:
 - **fastmcp pineado en 3.4.2.** No subir a >=3.4.3 sin `allowed_hosts`: introdujo
   `HostOriginGuardMiddleware` -> 421 en el dominio publico. Incidente 2026-07-07-001-CodeMCP.
 
+## Entorno virtual (regla F77)
+
+- Mi entorno: `venv/Scripts/activate` (creado 2026-09-17 con `C:/Python314/python`;
+  deps `-r requirements.txt -c constraints.txt`, calca el Dockerfile; pytest dev sin pinear).
+- NO crear, mover ni borrar entornos virtuales sin autorizacion del Guardian (dir. 5).
+  Un venv no es reubicable: moverlo lo rompe; se recrea, no se mueve.
+- Python real en Windows: `C:/Python314/python`. `python3` es el alias de la Microsoft Store: no usarlo.
+- Si tras activar, `which python` no apunta a mi entorno: parar y avisar al Guardian.
+
 ## Comandos
 
 ```bash
