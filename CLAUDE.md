@@ -61,11 +61,14 @@ Todo mensaje al Guardian empieza con una linea:
 
 ## Entorno virtual (regla F77)
 
-- Mi entorno: `venv/Scripts/activate` (creado 2026-09-17 con `C:/Python314/python`;
-  deps `-r requirements.txt -c constraints.txt`, calca el Dockerfile; pytest dev sin pinear).
+- Mi entorno: `venv/Scripts/activate` (recreado 2026-09-17 a Python 3.12.10 para paridad
+  con el Dockerfile `python:3.12-slim`; deps de produccion `-r requirements.txt -c constraints.txt`,
+  calca el Dockerfile; deps de desarrollo en `requirements-dev.txt` -- pytest sin pinear, NO van al contenedor).
 - NO crear, mover ni borrar entornos virtuales sin autorizacion del Guardian (dir. 5).
   Un venv no es reubicable: moverlo lo rompe; se recrea, no se mueve.
-- Python real en Windows: `C:/Python314/python`. `python3` es el alias de la Microsoft Store: no usarlo.
+- Interprete para recrear ESTE venv (paridad con prod, 3.12):
+  `C:/Users/ajmon/AppData/Local/Programs/Python/Python312/python.exe`. `C:/Python314/python`
+  es el 3.14 del sistema: NO usarlo para este repo. `python3` es el alias de la Microsoft Store: no usarlo.
 - Si tras activar, `which python` no apunta a mi entorno: parar y avisar al Guardian.
 
 ## Entorno Python

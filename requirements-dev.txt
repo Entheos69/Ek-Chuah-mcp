@@ -1,0 +1,8 @@
+# Ek-Chuah MCP (MCP-AEC) -- dependencias SOLO de desarrollo.
+# NO se instalan en el contenedor: el Dockerfile usa unicamente
+#   requirements.txt -c constraints.txt.
+# Recrear el entorno de desarrollo (prod + dev) en un solo paso:
+#   "$CLAUDE_PROJECT_PY" -m pip install -r requirements-dev.txt -c constraints.txt
+# Sin pinear (regla F77: pytest dev sin pinear); la produccion vive en requirements.txt.
+-r requirements.txt
+pytest
