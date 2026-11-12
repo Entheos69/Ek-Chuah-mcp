@@ -4,7 +4,7 @@ Caza la clase de bug del incidente 2026-11-12: el fallback lexico estaba muerto 
 existiera >=1 embedding, dejando invisibles las afirmaciones con embedding NULL. Estos tests
 fijan la decision de modo/alcance y el merge, que son el nucleo del fix.
 """
-from queries import _tokenize, _plan_busqueda, _merge
+from queries import _tokenize, _plan_busqueda, _merge, _ensamblar
 
 
 def test_tokenize_descarta_cortos_y_conserva_acentos():
@@ -62,3 +62,39 @@ def test_merge_dedup_y_prioridad():
 def test_merge_respeta_limit():
     sem = [{"af_id": str(i)} for i in range(5)]
     assert len(_merge(sem, [], 3, lexico_primero=False)) == 3
+
+
+def test_ensamblar_filtra_cola_debil_a_vecinos_aun_en_modo_embedding():
+    # el caso CMP-BEN-886 real: el top esta sobre umbral (mode=embedding), pero la COLA
+    # (0.59 CRM/CSS) esta debajo -> no debe salir como `hits`, va a vecinos_debiles.
+    plan = {"mode": "embedding"}
+    sem = [{"af_id": "fuerte", "similarity": 0.72}, {"af_id": "ruido", "similarity": 0.59}]
+    r = _ensamblar(plan, sem, [], {"total": 9}, limit=5, umbral=0.60)
+    assert [h["af_id"] for h in r["hits"]] == ["fuerte"]
+    assert [h["af_id"] for h in r["vecinos_debiles"]] == ["ruido"]
+
+
+def test_ensamblar_todo_debil_sin_lexico_devuelve_vacio():
+    # sin nada sobre umbral ni grano lexico: `hits` vacio (no fingir 'encontre').
+    plan = {"mode": "embedding_bajo_umbral"}
+    sem = [{"af_id": "ruido1", "similarity": 0.59}, {"af_id": "ruido2", "similarity": 0.55}]
+    r = _ensamblar(plan, sem, [], {"total": 9}, limit=5, umbral=0.60)
+    assert r["count"] == 0 and r["hits"] == []
+    assert [h["af_id"] for h in r["vecinos_debiles"]] == ["ruido1", "ruido2"]
+
+
+def test_ensamblar_todo_debil_con_lexico_manda_el_lexico():
+    plan = {"mode": "embedding_bajo_umbral"}
+    sem = [{"af_id": "ruido", "similarity": 0.58}]
+    lex = [{"af_id": "preciso"}]
+    r = _ensamblar(plan, sem, lex, {"total": 9}, limit=5, umbral=0.60)
+    assert [h["af_id"] for h in r["hits"]] == ["preciso"]
+    assert [h["af_id"] for h in r["vecinos_debiles"]] == ["ruido"]
+
+
+def test_ensamblar_todo_fuerte_sin_vecinos():
+    plan = {"mode": "embedding"}
+    sem = [{"af_id": "a", "similarity": 0.8}, {"af_id": "b", "similarity": 0.7}]
+    r = _ensamblar(plan, sem, [], {"total": 9}, limit=5, umbral=0.60)
+    assert [h["af_id"] for h in r["hits"]] == ["a", "b"]
+    assert "vecinos_debiles" not in r

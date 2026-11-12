@@ -89,6 +89,29 @@ def _merge(sem_hits: list, lex_hits: list, limit: int, lexico_primero: bool) -> 
     return out
 
 
+def _ensamblar(plan: dict, sem_hits: list, lex_hits: list, cobertura: dict,
+               limit: int, umbral: float = SIM_UMBRAL) -> dict:
+    """Arma la respuesta. Puro (sin DB).
+
+    Particiona el semantico POR UMBRAL por-hit (no por modo): un hit >= umbral es confiable;
+    uno < umbral es RUIDO y NO se presenta como `hits` -- un "encontre" falso es peor que un
+    "no encontre" en el indice anti-re-investigacion, porque hace que el agente NO re-investigue
+    algo que si debia. El ruido va a `vecinos_debiles`: visible para inspeccion (dir. 12), no
+    como respuesta. `hits` = semantico fuerte + lexico (por terminos), de-duplicado por af_id.
+    Si no hay semantico fuerte, el lexico manda (es preciso: casa terminos literales).
+    """
+    fuertes = [h for h in sem_hits if (h.get("similarity") or 0) >= umbral]
+    debiles = [h for h in sem_hits if (h.get("similarity") or 0) < umbral]
+    hits = _merge(fuertes, lex_hits, limit, lexico_primero=not fuertes)
+    resp = {"count": len(hits), "mode": plan["mode"],
+            "cobertura_embedding": cobertura, "hits": hits}
+    en_hits = {h["af_id"] for h in hits}
+    vd = [h for h in debiles if h["af_id"] not in en_hits]
+    if vd:
+        resp["vecinos_debiles"] = vd
+    return resp
+
+
 _SEARCH_SELECT = """
     SELECT a.id AS af_id, a.txt, a.tipo, a.estatus,
            v.referente_id, v.content_hash, v.capture_ts,
@@ -191,9 +214,7 @@ def aec_search(query: str, limit: int = 10, include_superadas: bool = False) -> 
             lex_hits = _buscar_lexico(session, _tokenize(query), query, est,
                                       limit, plan["solo_null"])
 
-        hits = _merge(sem_hits, lex_hits, limit, plan["lexico_primero"])
-        return {"count": len(hits), "mode": plan["mode"],
-                "cobertura_embedding": cobertura, "hits": hits}
+        return _ensamblar(plan, sem_hits, lex_hits, cobertura, limit)
     finally:
         session.close()
 

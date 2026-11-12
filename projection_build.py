@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import sys
+import time
 
 from sqlalchemy import text
 
@@ -45,6 +46,22 @@ logger = logging.getLogger(__name__)
 
 _TABLAS_PROYECCION = ["inscripcion", "necesidad", "consulta", "referente",
                       "version", "afirmacion", "referente_assert", "revision"]
+
+# Reintentos del embed: un flake transitorio de Gemini NO debe dejar un vector NULL en
+# silencio. Incidente 2026-11-12: un rebuild-on-boot embebio 97/98 -- la 98a flakeo y el
+# `if not emb: continue` la dejo NULL sin aviso, borrando su vector bueno (el rebuild TRUNCA).
+_EMBED_RETRIES = int(os.environ.get("AEC_EMBED_RETRIES", "3"))
+
+
+def _embed_reintentando(txt: str, intentos: int = _EMBED_RETRIES):
+    """embed(TASK_DOCUMENT) con reintento + backoff. None solo si agota los intentos."""
+    for i in range(intentos):
+        emb = embeddings.embed(txt, TASK_DOCUMENT)
+        if emb:
+            return emb
+        if i + 1 < intentos:
+            time.sleep(0.5 * (i + 1))
+    return None
 
 
 def _canon_line(ev: dict) -> str:
@@ -202,37 +219,44 @@ def rebuild_projection(engine, with_embeddings: bool = True) -> dict:
         for t in _TABLAS_PROYECCION:
             counts[t] = cx.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar()
 
-    embedded = 0
+    embedded = {"embebidas": 0, "fallidas": 0, "fallidas_ids": []}
     if with_embeddings:
         embedded = _build_embeddings(engine)
 
-    logger.info("rebuild ok: %s | embeddings: %d", counts, embedded)
+    logger.info("rebuild ok: %s | embeddings: %s", counts, embedded)
     return {"counts": counts, "embeddings": embedded}
 
 
-def _build_embeddings(engine) -> int:
+def _build_embeddings(engine) -> dict:
     """Computa embedding de cada afirmacion.txt para aec_search (Gemini, RETRIEVAL_DOCUMENT).
 
-    Regenerable (indice, no verdad): re-correr el rebuild lo recomputa.
+    Regenerable (indice, no verdad): re-correr el rebuild lo recomputa. Reintenta cada embed
+    y CUENTA los fallos con log ruidoso (dir. 8/12): un flake no debe dejar un vector NULL en
+    silencio -- ese fue el incidente 2026-11-12 (rebuild-on-boot dejo 97/98 sin aviso).
     """
     if not embeddings.available():
         logger.warning("GEMINI_API_KEY ausente: aec_search caera a ILIKE (sin embeddings)")
-        return 0
+        return {"embebidas": 0, "fallidas": 0, "fallidas_ids": []}
 
     with engine.connect() as cx:
         rows = cx.execute(text("SELECT id, txt FROM afirmacion")).fetchall()
 
-    n = 0
+    ok, fallidas_ids = 0, []
     with engine.begin() as cx:
         for r in rows:
-            emb = embeddings.embed(r[1], TASK_DOCUMENT)
+            emb = _embed_reintentando(r[1])
             if not emb:
+                fallidas_ids.append(r[0])
                 continue
             vec = "[" + ",".join(str(f) for f in emb) + "]"
             cx.execute(text("UPDATE afirmacion SET embedding = CAST(:v AS vector) WHERE id=:id"),
                        {"v": vec, "id": r[0]})
-            n += 1
-    return n
+            ok += 1
+    if fallidas_ids:
+        logger.warning("rebuild embeddings: %d de %d FALLARON tras reintentos y quedan NULL "
+                       "(invisibles al pase semantico): %s", len(fallidas_ids), len(rows),
+                       ", ".join(i[:12] for i in fallidas_ids))
+    return {"embebidas": ok, "fallidas": len(fallidas_ids), "fallidas_ids": fallidas_ids}
 
 
 def embed_missing(engine) -> dict:
@@ -251,21 +275,23 @@ def embed_missing(engine) -> dict:
         rows = cx.execute(text(
             "SELECT id, txt FROM afirmacion WHERE embedding IS NULL")).fetchall()
 
-    ok, fail = 0, 0
+    ok, fallidas_ids = 0, []
     with engine.begin() as cx:
         for r in rows:
-            emb = embeddings.embed(r[1], TASK_DOCUMENT)
+            emb = _embed_reintentando(r[1])
             if not emb:
-                fail += 1
+                fallidas_ids.append(r[0])
                 continue
             vec = "[" + ",".join(str(f) for f in emb) + "]"
             cx.execute(text("UPDATE afirmacion SET embedding = CAST(:v AS vector) WHERE id=:id"),
                        {"v": vec, "id": r[0]})
             ok += 1
-    res = {"candidatas": len(rows), "embebidas": ok, "fallidas": fail}
-    if fail:
-        logger.warning("embed-missing: %d de %d NO se embebieron (Gemini fallo) -- "
-                       "quedan NULL y siguen invisibles al pase semantico", fail, len(rows))
+    res = {"candidatas": len(rows), "embebidas": ok, "fallidas": len(fallidas_ids),
+           "fallidas_ids": fallidas_ids}
+    if fallidas_ids:
+        logger.warning("embed-missing: %d de %d NO se embebieron tras reintentos -- quedan NULL "
+                       "(invisibles al pase semantico): %s", len(fallidas_ids), len(rows),
+                       ", ".join(i[:12] for i in fallidas_ids))
     logger.info("embed-missing: %s", res)
     return res
 
