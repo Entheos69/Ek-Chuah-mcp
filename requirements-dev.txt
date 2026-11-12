@@ -6,3 +6,10 @@
 # Sin pinear (regla F77: pytest dev sin pinear); la produccion vive en requirements.txt.
 -r requirements.txt
 pytest
+# truststore: hace que Python use el almacen de certificados del SO. SOLO necesario para
+# correr e2e/backfill (que llaman a Gemini) desde una maquina con interceptor TLS -- p.ej.
+# Norton Web/Mail Shield re-firma el TLS con una CA que esta en el store de Windows pero no
+# en certifi, y el cliente de Gemini (httpx/certifi) lo rechaza. Uso: inyectar al arrancar,
+#   import truststore; truststore.inject_into_ssl()
+# Railway/Linux NO lo necesita (sin interceptor). Incidente 2026-11-12.
+truststore

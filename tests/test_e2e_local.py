@@ -15,6 +15,8 @@ Falsadores verificados:
   - aec_resolve ancla a content_hash desde URL cruda (I4 / D-ver-1)
   - aec_get_necesidad: traza descendente
   - read-only: un INSERT en sesion del lector falla (membrana)
+  - aec_search recall: ILIKE por terminos + cobertura_embedding (incidente 2026-11-12,
+    SOL Cowork->CodeAEC): el fallback no debe quedar ciego cuando el embedding es NULL
 """
 import json
 import os
@@ -118,6 +120,43 @@ def main():
     if h.get("necesidad_stub") is None or h.get("version_pin") is None:
         _fail(f"hit pelon (sin stub de via): {h}")
     _ok(f"search modo={sr['mode']} count={sr['count']}; hit trae stub de via (no pelon, I3)")
+
+    print("== aec_search recall: ILIKE por terminos + cobertura (regresion 2026-11-12) ==")
+    # cobertura_embedding SIEMPRE presente (dir. 12: silencio != ausencia)
+    if "cobertura_embedding" not in sr:
+        _fail("aec_search no reporta cobertura_embedding")
+    _ok(f"cobertura_embedding presente: {sr['cobertura_embedding']}")
+
+    # El bug: con embedding NULL, el ILIKE por SUBCADENA COMPLETA no casaba multi-palabra,
+    # y el `if rows:` del pase semantico dejaba muerto el fallback. Ahora el ILIKE es por
+    # TERMINOS. Tomamos el txt de una afirmacion, barajamos sus palabras + ruido, y exigimos
+    # reencontrarla (el codigo viejo fallaba este caso).
+    import re as _re
+    session = get_readonly_session()
+    sample = session.execute(text(
+        "SELECT id, txt FROM afirmacion WHERE length(txt) > 40 AND estatus='afirmado' "
+        "ORDER BY id LIMIT 1")).fetchone()
+    session.close()
+    toks = [t for t in _re.findall(r"\w+", sample.txt.lower()) if len(t) >= 4][:4]
+    query_barajada = "contexto irrelevante " + " ".join(reversed(toks))
+    if not any(h["af_id"] == sample.id for h in q.aec_search(query_barajada, limit=20)["hits"]):
+        _fail(f"fallback por terminos no reencontro {sample.id[:8]} con {query_barajada!r}")
+    _ok(f"fallback por terminos reencuentra {sample.id[:8]} pese a orden/ruido")
+
+    # Criterio §4 del SOL: la consulta de Ancamide devuelve abfcc728 en el top-5 (si el log
+    # de este entorno lo contiene; si no, se salta sin fallar).
+    ABF = "abfcc728e86eaa49af56d74fe407789809ea9f63dae184f29498a4535d41a16b"
+    session = get_readonly_session()
+    has_abf = session.execute(text("SELECT 1 FROM afirmacion WHERE id=:i"), {"i": ABF}).fetchone()
+    session.close()
+    if has_abf:
+        top5 = [h["af_id"] for h in q.aec_search(
+            "Ancamide 2353 poliamida endurecedor AHEW gel time hoja tecnica", limit=5)["hits"]]
+        if ABF not in top5:
+            _fail(f"consulta Ancamide no trajo abfcc728 en top-5: {[x[:8] for x in top5]}")
+        _ok("consulta Ancamide -> abfcc728 en top-5 (SOL Cowork 2026-11-12, criterio §4)")
+    else:
+        print("  [warn] abfcc728 no esta en este log; salto el criterio §4 especifico")
 
     print("== G-post: reconsideracion (revision) sobre Postgres ==")
     target = af_ids[0]

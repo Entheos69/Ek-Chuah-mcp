@@ -24,6 +24,7 @@ Uso CLI:
     python projection_build.py --replicate ../AEC/log/inscripciones.jsonl
     python projection_build.py --rebuild                      # reconstruye + embeddings
     python projection_build.py --rebuild --no-embeddings
+    python projection_build.py --embed-missing                # backfill solo NULL (no trunca)
     python projection_build.py --dump                         # volcado logico (I1)
 """
 from __future__ import annotations
@@ -234,6 +235,41 @@ def _build_embeddings(engine) -> int:
     return n
 
 
+def embed_missing(engine) -> dict:
+    """Backfill solo de afirmaciones con embedding NULL. NO trunca la proyeccion (a
+    diferencia de --rebuild), asi el lector C3 no ve una ventana de tablas vacias.
+
+    Reporta fallidas EXPLICITAMENTE (dir. 8/12): el modo de falla del 2026-09-16 fue que
+    embed() devuelve None en silencio -> el vector quedaba NULL sin aviso. Aqui se cuenta.
+    Sigue siendo escritura en produccion: exige autorizacion del Guardian (dir. 5).
+    """
+    if not embeddings.available():
+        logger.warning("GEMINI_API_KEY ausente: no se puede rellenar embeddings (no-op)")
+        return {"candidatas": 0, "embebidas": 0, "fallidas": 0}
+
+    with engine.connect() as cx:
+        rows = cx.execute(text(
+            "SELECT id, txt FROM afirmacion WHERE embedding IS NULL")).fetchall()
+
+    ok, fail = 0, 0
+    with engine.begin() as cx:
+        for r in rows:
+            emb = embeddings.embed(r[1], TASK_DOCUMENT)
+            if not emb:
+                fail += 1
+                continue
+            vec = "[" + ",".join(str(f) for f in emb) + "]"
+            cx.execute(text("UPDATE afirmacion SET embedding = CAST(:v AS vector) WHERE id=:id"),
+                       {"v": vec, "id": r[0]})
+            ok += 1
+    res = {"candidatas": len(rows), "embebidas": ok, "fallidas": fail}
+    if fail:
+        logger.warning("embed-missing: %d de %d NO se embebieron (Gemini fallo) -- "
+                       "quedan NULL y siguen invisibles al pase semantico", fail, len(rows))
+    logger.info("embed-missing: %s", res)
+    return res
+
+
 # ════════════════════════════════════════════════════════════════
 # falsador I1: dump logico (excluye embedding y la capa aec_log)
 # ════════════════════════════════════════════════════════════════
@@ -273,6 +309,8 @@ def main(argv=None):
     ap.add_argument("--replicate", metavar="JSONL", help="cargar log local a aec_log (prueba)")
     ap.add_argument("--rebuild", action="store_true", help="reconstruir la proyeccion de aec_log")
     ap.add_argument("--no-embeddings", action="store_true", help="rebuild sin embeddings")
+    ap.add_argument("--embed-missing", action="store_true",
+                    help="backfill solo de embeddings NULL (no trunca; escritura, gateada)")
     ap.add_argument("--dump", action="store_true", help="imprimir dump logico (I1)")
     args = ap.parse_args(argv)
 
@@ -285,13 +323,16 @@ def main(argv=None):
     if args.rebuild:
         res = rebuild_projection(engine, with_embeddings=not args.no_embeddings)
         print(json.dumps(res, ensure_ascii=False, indent=2))
+    if args.embed_missing:
+        res = embed_missing(engine)
+        print(json.dumps(res, ensure_ascii=False, indent=2))
     if args.dump:
         for t, rows in dump_logico(engine):
             print(f"# {t}: {len(rows)} filas")
             for row in rows:
                 print(json.dumps(row, ensure_ascii=False, default=str))
 
-    if not any([args.schema, args.replicate, args.rebuild, args.dump]):
+    if not any([args.schema, args.replicate, args.rebuild, args.embed_missing, args.dump]):
         ap.print_help()
         return 1
     return 0

@@ -14,6 +14,8 @@ MEMBRANA: ninguna funcion lee snapshots (nivel 1). Se devuelve content_hash,
 nunca bytes. Aqui NO se importa nada que toque AEC/snapshots.
 """
 import logging
+import os
+import re
 from typing import Optional
 
 from sqlalchemy import text
@@ -24,6 +26,14 @@ from embeddings import embed, TASK_QUERY
 
 logger = logging.getLogger(__name__)
 
+# Umbral de similitud: por debajo, el semantico se considera ruido y se activa lo
+# lexico (el Estratega midio ruido ~0.535 / acierto ~0.68; default conservador 0.60).
+# Env-overridable, igual que modelo/dim de embeddings (indice, no verdad).
+SIM_UMBRAL = float(os.environ.get("AEC_SIM_UMBRAL", "0.60"))
+
+# Tokens mas cortos que esto no discriminan; se descartan del ILIKE por terminos.
+_TOK_MIN = 3
+
 
 def _generate_query_embedding(query_text: str) -> list | None:
     """Embedding del query con task type RETRIEVAL_QUERY (asimetria de retrieval)."""
@@ -33,6 +43,51 @@ def _generate_query_embedding(query_text: str) -> list | None:
 # ════════════════════════════════════════════════════════════════
 # aec_search -- reconocimiento barato; hit con STUB de via, nunca pelon
 # ════════════════════════════════════════════════════════════════
+
+def _tokenize(query: str) -> list:
+    r"""Parte el query en terminos para el ILIKE lexico (no subcadena completa).
+
+    \w+ con UNICODE conserva acentos; descarta tokens < _TOK_MIN. Puro: testeable sin
+    DB. 'CMP-BEN-886' -> ['cmp','ben','886']; 'resina epoxica' -> ['resina','epoxica'].
+    """
+    toks = re.findall(r"\w+", (query or "").lower(), flags=re.UNICODE)
+    return [t for t in toks if len(t) >= _TOK_MIN]
+
+
+def _plan_busqueda(embedding_disponible: bool, n_sem: int, max_sim,
+                   sin_vector: bool, umbral: float = SIM_UMBRAL) -> dict:
+    """Decide modo y alcance del fallback. Puro (sin DB): es el nucleo del fix.
+
+    - sin embedding del query, o cero afirmaciones con vector -> ilike (lexico sobre todo).
+    - semantico por debajo del umbral -> embedding_bajo_umbral (lexico sobre todo, primero).
+    - semantico sano pero hay filas sin vector -> hibrido (lexico SOLO sobre las NULL, para
+      que las afirmaciones invisibles al vector sigan siendo alcanzables; semantico primero).
+    - semantico sano y cobertura total -> embedding (sin lexico).
+    """
+    bajo_umbral = (max_sim is not None and max_sim < umbral)
+    if not embedding_disponible or n_sem == 0:
+        return {"mode": "ilike", "lexico": True, "solo_null": False, "lexico_primero": True}
+    if bajo_umbral:
+        return {"mode": "embedding_bajo_umbral", "lexico": True,
+                "solo_null": False, "lexico_primero": True}
+    if sin_vector:
+        return {"mode": "hibrido", "lexico": True, "solo_null": True, "lexico_primero": False}
+    return {"mode": "embedding", "lexico": False, "solo_null": False, "lexico_primero": False}
+
+
+def _merge(sem_hits: list, lex_hits: list, limit: int, lexico_primero: bool) -> list:
+    """Une semantico y lexico de-duplicando por af_id, respetando prioridad. Puro."""
+    primero, segundo = (lex_hits, sem_hits) if lexico_primero else (sem_hits, lex_hits)
+    seen, out = set(), []
+    for h in list(primero) + list(segundo):
+        if h["af_id"] in seen:
+            continue
+        seen.add(h["af_id"])
+        out.append(h)
+        if len(out) >= limit:
+            break
+    return out
+
 
 _SEARCH_SELECT = """
     SELECT a.id AS af_id, a.txt, a.tipo, a.estatus,
@@ -45,12 +100,13 @@ _SEARCH_SELECT = """
 """
 
 
-def _hit_from_row(row, with_sim: bool) -> dict:
+def _hit_from_row(row, with_sim: bool, via: str) -> dict:
     hit = {
         "af_id": row.af_id,
         "txt": row.txt,
         "tipo": row.tipo,
         "estatus": row.estatus,
+        "via": via,
         "version_pin": {
             "referente_id": row.referente_id,
             "content_hash": row.content_hash,
@@ -66,21 +122,57 @@ def _hit_from_row(row, with_sim: bool) -> dict:
     return hit
 
 
+def _buscar_lexico(session, tokens, query, est, limit, solo_null):
+    """ILIKE por terminos (o por subcadena si no hay tokens). Ranking = # de terminos
+    casados; a.ts DESC desempata. solo_null restringe a filas sin vector (alcance hibrido)."""
+    scope = " AND a.embedding IS NULL" if solo_null else ""
+    if tokens:
+        params = {"limit": limit}
+        conds, score_terms = [], []
+        for i, tok in enumerate(tokens):
+            key = f"t{i}"
+            params[key] = f"%{tok}%"
+            conds.append(f"a.txt ILIKE :{key}")
+            score_terms.append(f"(CASE WHEN a.txt ILIKE :{key} THEN 1 ELSE 0 END)")
+        sql = _SEARCH_SELECT.format(sim=", (" + " + ".join(score_terms) + ") AS _score")
+        sql += (" WHERE (" + " OR ".join(conds) + ")" + est + scope +
+                " ORDER BY _score DESC, a.ts DESC LIMIT :limit")
+    else:
+        params = {"pat": f"%{query}%", "limit": limit}
+        sql = _SEARCH_SELECT.format(sim="")
+        sql += " WHERE a.txt ILIKE :pat" + est + scope + " ORDER BY a.ts DESC LIMIT :limit"
+    rows = session.execute(text(sql), params).fetchall()
+    return [_hit_from_row(r, False, "lexico") for r in rows]
+
+
 def aec_search(query: str, limit: int = 10, include_superadas: bool = False) -> dict:
-    """Indice anti-re-investigacion. Embedding (pgvector) con fallback ILIKE.
+    """Indice anti-re-investigacion. Hibrido: pgvector + ILIKE por terminos.
 
-    Cada hit trae stub de via (necesidad + pin de version) -- NUNCA un dato pelon (I3).
-    La via completa se expande on-demand con aec_get_via.
+    Cada hit trae stub de via (necesidad + pin de version) -- NUNCA un dato pelon (I3) --
+    y una etiqueta `via` (embedding|lexico). La respuesta incluye `cobertura_embedding`
+    {total, con_vector, sin_vector}: cuantas afirmaciones NO tienen vector y por tanto
+    quedaron fuera del pase semantico (dir. 12: silencio != ausencia). `mode` in
+    {embedding, hibrido, embedding_bajo_umbral, ilike} declara que ramas corrieron.
 
-    G-post: por defecto excluye afirmaciones superadas/retractadas (solo estatus='afirmado')
-    -- una reconsideracion no debe re-aparecer como saber vigente. include_superadas=True
-    las trae (historia; Forma-vs-Valor: se conservan, no se borran).
+    Antes este fallback estaba muerto: el `if rows:` del pase semantico lo saltaba mientras
+    existiera >=1 vector, dejando invisibles las afirmaciones con embedding NULL (incidente
+    2026-11-12: 88/98 sin vector -> busqueda siempre devolvia los 10 unicos embebidos).
+
+    G-post: por defecto excluye superadas/retractadas (solo estatus='afirmado');
+    include_superadas=True trae la historia (Forma-vs-Valor: se conservan, no se borran).
     """
     # el estatus efectivo ya lo dejo aplicado el rebuild (la revision volteo afirmacion.estatus)
     est = "" if include_superadas else " AND a.estatus = 'afirmado'"
     embedding = _generate_query_embedding(query)
     session = get_readonly_session()
     try:
+        cov = session.execute(text(
+            "SELECT count(*) total, count(*) FILTER (WHERE embedding IS NULL) sv "
+            "FROM afirmacion a WHERE TRUE" + est)).fetchone()
+        cobertura = {"total": cov.total, "con_vector": cov.total - cov.sv,
+                     "sin_vector": cov.sv}
+
+        sem_hits, max_sim = [], None
         if embedding:
             vec = "[" + ",".join(str(f) for f in embedding) + "]"
             sql = _SEARCH_SELECT.format(
@@ -88,16 +180,20 @@ def aec_search(query: str, limit: int = 10, include_superadas: bool = False) -> 
             sql += (" WHERE a.embedding IS NOT NULL" + est +
                     " ORDER BY a.embedding <=> CAST(:vec AS vector) ASC LIMIT :limit")
             rows = session.execute(text(sql), {"vec": vec, "limit": limit}).fetchall()
-            if rows:
-                return {"count": len(rows), "mode": "embedding",
-                        "hits": [_hit_from_row(r, True) for r in rows]}
+            sem_hits = [_hit_from_row(r, True, "embedding") for r in rows]
+            if sem_hits:
+                max_sim = sem_hits[0]["similarity"]
 
-        # fallback ILIKE sobre el texto de la afirmacion
-        sql = _SEARCH_SELECT.format(sim="")
-        sql += " WHERE a.txt ILIKE :pat" + est + " ORDER BY a.ts DESC LIMIT :limit"
-        rows = session.execute(text(sql), {"pat": f"%{query}%", "limit": limit}).fetchall()
-        return {"count": len(rows), "mode": "ilike",
-                "hits": [_hit_from_row(r, False) for r in rows]}
+        plan = _plan_busqueda(bool(embedding), len(sem_hits), max_sim,
+                              cobertura["sin_vector"] > 0)
+        lex_hits = []
+        if plan["lexico"]:
+            lex_hits = _buscar_lexico(session, _tokenize(query), query, est,
+                                      limit, plan["solo_null"])
+
+        hits = _merge(sem_hits, lex_hits, limit, plan["lexico_primero"])
+        return {"count": len(hits), "mode": plan["mode"],
+                "cobertura_embedding": cobertura, "hits": hits}
     finally:
         session.close()
 

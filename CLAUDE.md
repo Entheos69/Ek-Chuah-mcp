@@ -79,6 +79,10 @@ Todo mensaje al Guardian empieza con una linea:
   Con uv: `uv pip install --python "$CLAUDE_PROJECT_PY" <paquete>`.
 - Primera acción de cada sesión: `echo "$CLAUDE_PROJECT_PY"` y `command -v python`;
   si difieren, usar siempre la primera.
+- Si corres e2e o backfill (llaman a Gemini) desde esta máquina y ves
+  `SSL: CERTIFICATE_VERIFY_FAILED`: es el interceptor TLS local (Norton re-firma con una CA
+  que no está en `certifi`). Arranca con `import truststore; truststore.inject_into_ssl()`
+  (dev-only, en `requirements-dev.txt`; Railway/Linux no lo necesita). Incidente 2026-11-12.
 
 ## Comandos
 
